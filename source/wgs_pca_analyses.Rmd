@@ -1,0 +1,126 @@
+---
+title: "WGS data, for eight distinct specimens of the Creeping Vole, Microtus oregoni"
+author: "bongi-gumbi"
+date: "2025-09-30"
+output: html_notebook
+---
+
+### Converting the VCF to a GDS file
+
+```{r vcf_2_gds}
+# Install required package if not already installed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("SNPRelate")
+
+library(SNPRelate)
+
+# Input/output files
+vcf.fn <- "~/radseq/wgs/analysis_results/angsd_genotype_calling/wgs_angsd.vcf.gz"
+gds.fn <- "~/radseq/wgs/analysis_results/angsd_genotype_calling/wgs.angsd.gds"
+
+# Convert VCF to GDS format
+snpgdsVCF2GDS(
+  vcf.fn,
+  gds.fn,
+  method = "biallelic.only",   # keep only biallelic SNPs
+  ignore.chr.prefix = "chr"    # adjust if your scaffolds/chroms have a "chr" prefix
+)
+
+cat("Conversion finished! GDS file created:", gds.fn, "\n")
+
+```
+
+
+```{r wgs_pca_analyses}
+library(SNPRelate)
+library(tidyverse)
+
+# Input/output file names
+vcf.fn <- "~/radseq/wgs/analysis_results/angsd_genotype_calling/wgs_angsd.vcf.gz"
+gds.fn <- "~/radseq/wgs/analysis_results/angsd_genotype_calling/wgs.angsd.gds"
+
+# Convert VCF to GDS (Genomic Data Structure) format
+snpgdsVCF2GDS(vcf.fn, gds.fn, method="biallelic.only")
+
+# Open the GDS file
+genofile <- snpgdsOpen(gds.fn)
+
+# Perform LD pruning (optional but recommended for PCA)
+set.seed(123)
+snpset <- snpgdsLDpruning(genofile, ld.threshold=0.2, autosome.only = FALSE)
+snpset.id <- unlist(snpset)
+# Run PCA
+pca <- snpgdsPCA(genofile, snp.id=snpset.id, num.thread=4, autosome.only = FALSE)
+# Close file
+snpgdsClose(genofile)
+```
+
+### Create a data frame for plotting
+
+```{r pca_dataframe}
+# Create a data frame for plotting
+pc.percent <- pca$varprop * 100
+pca.df <- data.frame(
+    sample.id = pca$sample.id,
+    PC1 = pca$eigenvect[,1],
+    PC2 = pca$eigenvect[,2])
+
+pca_cleaned <- pca.df %>%
+  # Create a new column 'sample_id_clean' by manipulating the original 'sample.id'
+  mutate(
+    # Use str_extract to find and pull out the specific pattern:
+    # 1. Start with 'MIOR_'
+    # 2. Followed by one or more digits (\\d+)
+    # 3. The '_' ensures we capture the base sample ID and stop before the '30' or '35'
+    sample_id_clean = str_extract(sample.id, "MIOR_\\d+")) %>%
+  # Select only the new clean ID and the PCA results, and rename the column
+  select(
+    sample.id = sample_id_clean, # Overwrite the original column with the clean name
+    PC1,PC2)
+
+# --- 3. Display the results ---
+cat("\n--- Cleaned Data Structure ---\n")
+print(head(pca_cleaned))
+
+# If you want to view the final, resulting dataframe, run:
+View(pca_cleaned)
+
+# If you want to save the new dataframe to a file:
+write_tsv(pca_cleaned, "~/radseq/wgs/mior_wgs/tables/pca_results.tsv")
+```
+
+###  PCA plot colored by population
+
+```{r pca_plot}
+# PCA plot colored by population (or treatment)
+ggplot(pca_cleaned, aes(x = PC1, y = PC2, color = sample.id, label = sample.id)) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_text(vjust = -0.5, hjust = 0.5, size = 3) +
+  xlab(paste0("PC1 (", round(pc.percent[1], 2), "%)")) +
+  ylab(paste0("PC2 (", round(pc.percent[2], 2), "%)")) +
+  ggtitle("PCA of WGS Data") +
+  theme_ipsum() +
+  scale_color_brewer(palette = "Set2")  # nice color palette
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
